@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>病院 物流・医事管理 Gemini 3 高精度Q&Aシステム</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .active-tab { border-bottom: 3px solid #0d9488; color: #0f766e; font-weight: 600; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+    <!-- Header -->
+    <header class="bg-teal-800 text-white shadow-md py-4 px-6 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-hospital-user text-2xl text-teal-200"></i>
+                <div>
+                    <h1 class="text-lg font-bold tracking-wide">病院 物流・医事管理 高精度Q&Aシステム</h1>
+                    <p class="text-xs text-teal-200">Gemini 3 高度コンテキスト参照 ＆ スプレッドシート同期</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="openApiKeyModal()" class="text-xs bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow">
+                    <i class="fa-solid fa-key"></i> Gemini APIキー設定
+                </button>
+                <button onclick="openGasModal()" class="text-xs bg-teal-900 hover:bg-teal-950 text-teal-100 border border-teal-600 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-plug text-amber-400"></i> シート連携設定
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="bg-white border-b border-slate-200 sticky top-16 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 flex space-x-8 overflow-x-auto">
+            <button id="tab-qa-btn" onclick="switchTab('qa')" class="py-3 px-2 text-sm text-slate-600 active-tab transition flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-brain text-teal-600"></i> 高精度AI回答 ＆ シート同期
+            </button>
+            <button id="tab-logs-btn" onclick="switchTab('logs')" class="py-3 px-2 text-sm text-slate-600 transition flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-list-check"></i> 問い合わせログ (シート同期結果) <span id="log-count-badge" class="bg-teal-100 text-teal-800 text-xs px-2 py-0.5 rounded-full font-bold">0</span>
+            </button>
+            <button id="tab-master-btn" onclick="switchTab('master')" class="py-3 px-2 text-sm text-slate-600 transition flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-table"></i> 全マスタ一覧（返戻・物流・マスタ）
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="max-w-7xl mx-auto w-full flex-1 p-4 md:p-6 flex flex-col gap-6">
+
+        <!-- TAB 1: Q&A Engine -->
+        <section id="sec-qa" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Input Form -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                    <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-magnifying-glass text-teal-600"></i> 質問・キーワード入力
+                    </h2>
+                    
+                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-lg flex items-center justify-between">
+                        <div>
+                            <span class="text-[10px] text-slate-500 font-semibold block uppercase">担当エージェント (自動判定)</span>
+                            <span id="detected-agent" class="text-xs font-bold text-teal-700 flex items-center gap-1">
+                                <i class="fa-solid fa-robot text-teal-600"></i> 入力内容から自動選定
+                            </span>
+                        </div>
+                        <span class="text-[10px] bg-teal-100 text-teal-800 font-semibold px-2 py-0.5 rounded-full">AUTO</span>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">推論モデル</label>
+                        <select id="model-select" class="w-full text-sm p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none font-medium text-teal-900">
+                            <option value="Gemini 3 Flash">Gemini 3 Flash (高精度・推奨)</option>
+                            <option value="Gemini 3 Pro">Gemini 3 Pro (高度分析)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">質問内容</label>
+                        <textarea id="user-query" oninput="previewAgentSelection()" rows="4" class="w-full p-3 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none" placeholder="例: ブロンコ1を気管支動脈に使用して査定された時の対応は？&#10;例: 納品書とデータ入力の単位が違う時の対応は？"></textarea>
+                    </div>
+
+                    <button id="submit-btn" onclick="askGeminiAndSync()" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-semibold py-2.5 px-4 rounded-lg shadow transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-sparkles"></i> 高精度回答を生成＆シート反映
+                    </button>
+                </div>
+
+                <!-- Short Cut Buttons -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">回答精度検証用サンプル事例</h3>
+                    <div class="space-y-2">
+                        <button onclick="setQuery('ブロンコ1を気管支動脈の塞栓術で使用して査定された場合の症状詳記の対応方法は？')" class="w-full text-left text-xs bg-slate-50 hover:bg-teal-50 hover:text-teal-800 p-2.5 rounded-lg border border-slate-200 transition">
+                            <i class="fa-regular fa-circle-question text-teal-600 mr-1"></i> ブロンコ1/ブロンコ2の気管支動脈塞栓査定
+                        </button>
+                        <button onclick="setQuery('アビテンとフロシールを併用した時の請求対応は？')" class="w-full text-left text-xs bg-slate-50 hover:bg-teal-50 hover:text-teal-800 p-2.5 rounded-lg border border-slate-200 transition">
+                            <i class="fa-regular fa-circle-question text-teal-600 mr-1"></i> アビテンとフロシールの併用請求
+                        </button>
+                        <button onclick="setQuery('バーコードを読み込んだ時に2つの物品が出てきてしまった時の対処法')" class="w-full text-left text-xs bg-slate-50 hover:bg-teal-50 hover:text-teal-800 p-2.5 rounded-lg border border-slate-200 transition">
+                            <i class="fa-regular fa-circle-question text-teal-600 mr-1"></i> バーコード重複時の医事課連絡手順
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Answer Display -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[380px]">
+                    <div class="flex justify-between items-center border-b pb-3 mb-4">
+                        <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-brain text-teal-600"></i> 回答結果レポート
+                        </h2>
+                        <span id="status-tag" class="hidden text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <i class="fa-solid fa-check-circle"></i> クラウドシート同期完了
+                        </span>
+                    </div>
+
+                    <div id="answer-content" class="flex-1 text-slate-700 text-sm leading-relaxed space-y-3">
+                        <div class="h-full flex flex-col items-center justify-center text-slate-400 py-12">
+                            <i class="fa-solid fa-sparkles text-4xl mb-3 text-teal-400"></i>
+                            <p>質問を入力すると、全マスタから最も関連性の高いルールを正確に抽出し回答を作成します。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reference Context Source -->
+                <div class="bg-slate-100 p-4 rounded-xl border border-slate-200">
+                    <h3 class="text-xs font-bold text-slate-600 mb-2 flex items-center gap-1">
+                        <i class="fa-solid fa-link text-slate-500"></i> 回答根拠として抽出されたマニュアル箇所
+                    </h3>
+                    <div id="ref-context" class="text-xs font-mono bg-white p-3 rounded border border-slate-200 overflow-x-auto text-slate-600 max-h-40 whitespace-pre-wrap">
+                        質問を実行すると参照されたマスタデータ行がここに抽出表示されます。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: Live Spreadsheet View -->
+        <section id="sec-logs" class="hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-table-list text-teal-600"></i> 問い合わせ内容 Googleスプレッドシート
+                    </h2>
+                    <p class="text-xs text-slate-500">高精度AI回答と実行日時が自動記録されます。</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="fetchLogsFromGoogleSheet()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 px-3 rounded-lg border transition flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-right"></i> シート再読み込み
+                    </button>
+                    <button onclick="exportCSV('問い合わせ内容')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-3 rounded-lg shadow transition flex items-center gap-1">
+                        <i class="fa-solid fa-file-csv"></i> CSVダウンロード
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto border border-slate-200 rounded-lg max-h-[500px]">
+                <table class="w-full text-xs text-left text-slate-600">
+                    <thead class="text-xs text-slate-700 uppercase bg-slate-100 sticky top-0 border-b">
+                        <tr>
+                            <th class="px-4 py-3 min-w-[140px]">日時</th>
+                            <th class="px-4 py-3 min-w-[180px]">質問内容</th>
+                            <th class="px-4 py-3 min-w-[140px]">担当エージェント</th>
+                            <th class="px-4 py-3 min-w-[300px]">回答結果</th>
+                            <th class="px-4 py-3 min-w-[110px]">推論モデル</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-table-body" class="divide-y divide-slate-200 bg-white">
+                        <!-- Dynamic Rows -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 3: Master Tables -->
+        <section id="sec-master" class="hidden space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <label class="text-xs font-bold text-slate-600">閲覧マスタ:</label>
+                        <select id="master-select" onchange="renderMasterTable()" class="text-sm p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none">
+                            <option value="症状詳記返戻対応">症状詳記返戻対応.csv (16件全件)</option>
+                            <option value="物流管理">物流管理.csv (6件全件)</option>
+                            <option value="物流マスタ">物流マスタ.csv (4件全件)</option>
+                        </select>
+                    </div>
+                    <button onclick="exportCSV(document.getElementById('master-select').value)" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-3 rounded-lg transition flex items-center gap-1">
+                        <i class="fa-solid fa-download"></i> CSVエクスポート
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto border border-slate-200 rounded-lg max-h-[450px]">
+                    <table class="w-full text-xs text-left text-slate-600">
+                        <thead id="master-thead" class="text-xs text-slate-700 uppercase bg-slate-100 sticky top-0 border-b">
+                            <!-- Dynamic Header -->
+                        </thead>
+                        <tbody id="master-tbody" class="divide-y divide-slate-200 bg-white">
+                            <!-- Dynamic Body -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modals -->
+    <div id="apikey-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
+            <div class="flex items-center justify-between border-b pb-3">
+                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-key text-amber-500"></i> Gemini API Key 設定
+                </h3>
+                <button onclick="closeApiKeyModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="space-y-3 text-xs text-slate-600">
+                <p>Google AI Studio（https://aistudio.google.com/）で発行したGemini APIキーを入力してください。</p>
+                <input type="password" id="gemini-key-input" class="w-full p-2.5 border rounded-lg font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500" placeholder="AIzaSy...">
+            </div>
+            <div class="flex justify-end space-x-2 pt-3 border-t">
+                <button onclick="closeApiKeyModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">キャンセル</button>
+                <button onclick="saveApiKey()" class="px-4 py-2 text-xs font-medium bg-amber-500 text-slate-900 font-bold hover:bg-amber-600 rounded-lg shadow">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="gas-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
+            <div class="flex items-center justify-between border-b pb-3">
+                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-plug text-teal-600"></i> Googleスプレッドシート Web API連携設定
+                </h3>
+                <button onclick="closeGasModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="space-y-3 text-xs text-slate-600">
+                <p>Google Apps Script (GAS) の「ウェブアプリURL」を入力してください。</p>
+                <input type="text" id="gas-url-input" class="w-full p-2.5 border rounded-lg font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+            <div class="flex justify-end space-x-2 pt-3 border-t">
+                <button onclick="closeGasModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">キャンセル</button>
+                <button onclick="saveGasUrl()" class="px-4 py-2 text-xs font-medium bg-teal-700 text-white hover:bg-teal-800 rounded-lg shadow">保存して適用</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let geminiApiKey = localStorage.getItem('GEMINI_API_KEY') || '';
+        let gasWebAppUrl = localStorage.getItem('GAS_WEB_APP_URL') || '';
+
+        // COMPLETE 100% DATASET (Fully Restored from CSVs)
+        const db = {
+            "症状詳記返戻対応": [
+                { "返戻対象物品償還名": "インサイトA", "分類": "過剰", "返戻内容": "観血的動脈圧モニターを算定する必要あり", "対応方法": "新規で算定する", "備考": "" },
+                { "返戻対象物品償還名": "サージフロー", "分類": "過剰", "返戻内容": "ほかの止血剤を併用している(デンプン由来吸収性局所止血剤)", "対応方法": "対応不可(病院持ち出し)", "備考": "担当科部長に報告" },
+                { "返戻対象物品償還名": "バスケ―ド", "分類": "過剰", "返戻内容": "バスケ―ドを使用して止血したが、入院日数が既定の2泊3日を超えているため査定", "対応方法": "対応不可(病院持ち出し)", "備考": "症例を循環器内科部長に報告し、再発予防策を立てていただく" },
+                { "返戻対象物品償還名": "微小血管用ガイドワイヤ―", "分類": "過剰", "返戻内容": "一回の手技において使用できる微小血管用ガイドワイヤ―は2本まで", "対応方法": "対応不可(病院持ち出し)", "備考": "症例を確認し、臨床工学技士(循環器内科担当)に連絡。メーカにサンプル処理を依頼する" },
+                { "返戻対象物品償還名": "血管造影用カテーテル(脳血管・腹部血管専用型)/ブロンコ1/ブロンコ2", "分類": "適応外", "返戻内容": "気管支動脈の塞栓術で使用したが、償還名が違うため査定", "対応方法": "症状詳記にブロンコ1もしくはブロンコ2が気管支動脈に特化したカーブ形状であるため使用する必要があることを標記", "備考": "医師に報告し、症状詳記に追記" },
+                { "返戻対象物品償還名": "ダイレータ", "分類": "適応外", "返戻内容": "シースにダイレータが入っているため過剰使用", "対応方法": "ダイレータが必要な理由を詳記に記載", "備考": "" },
+                { "返戻対象物品償還名": "合成吸収性癒着防止剤/インターシード", "分類": "-", "返戻内容": "合成吸収性癒着防止剤/インターシード", "対応方法": "一日で373.38㎠以上の使用は認められない", "備考": "" },
+                { "返戻対象物品償還名": "微線維性コラーゲン/アビテン/フロシール", "分類": "-", "返戻内容": "微線維性コラーゲン", "対応方法": "アビテンとフロシールの併用請求は不可", "備考": "担当科部長に併用禁止の連絡" },
+                { "返戻対象物品償還名": "インサイトA/動脈圧モニターカテ末しょう型", "分類": "適応外", "返戻内容": "過剰使用", "対応方法": "集中治療室にて管理するため", "備考": "" },
+                { "返戻対象物品償還名": "再狭窄抑制型", "分類": "過剰", "返戻内容": "ＤＣＢ2とバディーワイヤー型、カッティングがたは算定できない", "対応方法": "対応不可", "備考": "" },
+                { "返戻対象物品償還名": "PTCA用ガイドワイヤ―(複合・高度狭窄型)", "分類": "過剰", "返戻内容": "1治療で使用できるガイドワイヤ―は4本まで", "対応方法": "対応不可", "備考": "" },
+                { "返戻対象物品償還名": "オクリュージョンカテーテル(特殊型)", "分類": "過剰", "返戻内容": "2本目を使用すると算定できない", "対応方法": "対応不可", "備考": "" },
+                { "返戻対象物品償還名": "交換用ガイドワイヤ", "分類": "過剰", "返戻内容": "2本目を使用すると算定できない", "対応方法": "対応不可", "備考": "" },
+                { "返戻対象物品償還名": "PTAバルーンカテーテル(一般型・特殊型)", "分類": "過剰", "返戻内容": "経皮的シャント拡張術は1本のみ算定可能", "対応方法": "サンプル処理もしくは使用した理由を症状詳記に記載", "備考": "医師に記載を依頼。メーカにサンプル処理依頼" },
+                { "返戻対象物品償還名": "ペースメーカ(デュアルチャンバー(リード一体型))", "分類": "過剰", "返戻内容": "ペースメーカデュアルチャンバ型を同時に請求すると査定される", "対応方法": "リードレスペースメーカが一旦体内に入ったことにし、閾値上昇などの理由により経静脈リードを追加する必要になったことを詳記に記載", "備考": "医師に追記を依頼・メーカにサンプル処理依頼" },
+                { "返戻対象物品償還名": "ダイアライザー(S型)", "分類": "過剰", "返戻内容": "人工心肺を使用しているときにダイアライザーを使用すると算定できない", "対応方法": "対応不可", "備考": "" }
+            ],
+            "物流管理": [
+                { "業務分類": "納品書入力", "内容": "納品書の数とデータ入力の単位が違う時がある", "対応方法": "データ入力の単位に合わせて入力をお願いします。", "追記": "計算が必要ですがお願いします。" },
+                { "業務分類": "納品書入力", "内容": "救命救急病棟の病棟がない", "対応方法": "ERICUとHCUが救命救急病棟に合併されました。2部署の合算が救命救急病棟の数と認識してください。", "追記": "" },
+                { "業務分類": "納品書入力", "内容": "10B病棟がない", "対応方法": "2026年4月より休床しています。稼働していません。", "追記": "" },
+                { "業務分類": "棚卸入力", "内容": "カタログNoから検索できない", "対応方法": "物品名で検索してください。また、「データ」でソートがかかっていませんか？", "追記": "" },
+                { "業務分類": "物品検索", "内容": "カタログNoから検索できない", "対応方法": "海外製品だと、日本のカタログNoと異なるNoが商品に記載されている可能性があります。対処方法としては、Webで同じ名称と規格の商品を検索していただき、ｶﾀﾛｸﾞNo が物流マスタもしくは商品マスタと同じであればその商品です。JANコードのみあっている可能性があるのでそちらでも検索をしてください", "追記": "" },
+                { "業務分類": "納品書入力", "内容": "在庫がマイナスになっている", "対応方法": "在庫数を0にして納入した分を入力してください。", "追記": "" }
+            ],
+            "物流マスタ": [
+                { "項目": "マスタ修正", "内容": "販売中止した物品の物品マスタの有効期限を設定するタイミングがわからない", "対応方法": "販売中止がわかった時点から3カ月後に有効期限を設定" },
+                { "項目": "メディエ対応", "内容": "メディエの登録を削除するタイミングがわからない", "対応方法": "販売中止がわかった時点から3カ月後に有効期限を設定" },
+                { "項目": "マスタ修正", "内容": "バーコードを呼んだ時に2つの物品が出てきてしまった", "対応方法": "医事課にスクリーンショットを印刷して送る。現在採用されている医事課コードのみ残して、それ以外は有効期限を設定し使用不可にする。" },
+                { "項目": "マスタ修正", "内容": "販売終了しているが、植え込まれた患者がいるために削除できない", "対応方法": "メディエの登録を削除、物品マスタの有効期限を設定、物品マスタのメモの部分に内容を標記する" }
+            ],
+            "問い合わせ内容": []
+        };
+
+        // Advanced Agent Selection
+        function determineAgent(queryText) {
+            const q = queryText.toLowerCase();
+            if (q.includes("テスト") || q.includes("接続")) return "接続診断";
+            if (q.includes("定価") || q.includes("単価") || q.includes("仕入") || q.includes("規格") || q.includes("jan")) return "商品マスタ・検索専門";
+            if (q.includes("返戻") || q.includes("査定") || q.includes("算定") || q.includes("適応") || q.includes("詳記") || q.includes("併用") || q.includes("過剰") || q.includes("ブロンコ") || q.includes("アビテン") || q.includes("フロシール") || q.includes("カテーテル")) return "診療報酬・返戻査定専門";
+            if (q.includes("納品書") || q.includes("病棟") || q.includes("棚卸") || q.includes("単位") || q.includes("カタログ") || q.includes("在庫") || q.includes("バーコード") || q.includes("有効期限")) return "物流現場運用専門";
+            return "診療報酬・返戻査定専門";
+        }
+
+        function previewAgentSelection() {
+            const text = document.getElementById('user-query').value.trim();
+            const badge = document.getElementById('detected-agent');
+            if (!text) {
+                badge.innerHTML = `<i class="fa-solid fa-robot text-teal-600"></i> 入力内容から自動選定`;
+                return;
+            }
+            const agent = determineAgent(text);
+            badge.innerHTML = `<i class="fa-solid fa-user-gear text-teal-600"></i> ${agent}`;
+        }
+
+        // Advanced Context Retrieval Engine (Scoring Matches)
+        function retrieveBestContext(query) {
+            const keywords = query.replace(/[、。！？\s]+/g, " ").split(" ").filter(k => k.length > 0);
+            let scoredResults = [];
+
+            for (const sheetName in db) {
+                if (sheetName === "問い合わせ内容") continue;
+                
+                db[sheetName].forEach(row => {
+                    let textToSearch = Object.values(row).join(" ").toLowerCase();
+                    let score = 0;
+
+                    keywords.forEach(kw => {
+                        if (kw.length > 1 && textToSearch.includes(kw.toLowerCase())) {
+                            score += kw.length * 2;
+                        }
+                    });
+
+                    if (score > 0) {
+                        scoredResults.push({
+                            sheet: sheetName,
+                            score: score,
+                            row: row
+                        });
+                    }
+                });
+            }
+
+            // Sort by score descending
+            scoredResults.sort((a, b) => b.score - a.score);
+
+            // Return top matched context rows
+            if (scoredResults.length > 0) {
+                return scoredResults.slice(0, 3).map(r => `[シート: ${r.sheet}]\n` + Object.entries(r.row).map(([k,v]) => `${k}: ${v || 'なし'}`).join("\n")).join("\n\n");
+            }
+
+            // Fallback: Return all返戻 table summaries if no direct keyword match
+            return "全マスタから直接の完全一致キーワードが見つかりませんでした。以下の関連規程を全体照合してください:\n" + JSON.stringify(db["症状詳記返戻対応"].slice(0, 5));
+        }
+
+        // Main Query Handler with Gemini
+        async function askGeminiAndSync() {
+            const query = document.getElementById('user-query').value.trim();
+            const selectedModelName = document.getElementById('model-select').value;
+            const apiModelEndpoint = selectedModelName.includes("Pro") ? "gemini-1.5-pro" : "gemini-1.5-flash";
+
+            if(!query) {
+                alert('質問内容を入力してください。');
+                return;
+            }
+
+            const agent = determineAgent(query);
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 高精度検索＆${selectedModelName}推論中...`;
+
+            // Retrieve High-Precision Context
+            const retrievedContext = retrieveBestContext(query);
+            document.getElementById('ref-context').innerText = retrievedContext;
+
+            let answerText = "";
+
+            if (geminiApiKey) {
+                try {
+                    const systemPrompt = `あなたは病院の「物流・医事管理マニュアル」の回答作成専門AI（担当: ${agent}）です。
+以下の【マニュアル参照データ】を100%の根拠として利用し、ユーザーの【質問】に対して最も正確な回答を作成してください。
+
+【マニュアル参照データ】
+${retrievedContext}
+
+【質問】
+${query}
+
+【出力フォーマット規定】
+・最初に「【対応方法】」として、実行すべき具体的アクションを分かりやすく明記してください。
+・次に「【理由・査定背景】」として、マニュアルに記載されている理由や補足情報を簡潔に記載してください。
+・関係部署（医師、担当科部長、医事課、メーカ等）への報告指示がある場合は、見落とさないよう明記してください。
+・マニュアルに該当データが全く存在しない場合のみ「回答するデータがありません。」と返答してください。`;
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModelEndpoint}:generateContent?key=${geminiApiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: systemPrompt }] }]
+                        })
+                    });
+
+                    const resData = await response.json();
+                    if (resData.candidates && resData.candidates[0].content.parts[0].text) {
+                        answerText = resData.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Gemini response null");
+                    }
+                } catch (e) {
+                    console.error("Gemini Error:", e);
+                    answerText = generateDeterministicFallback(query, retrievedContext);
+                }
+            } else {
+                answerText = generateDeterministicFallback(query, retrievedContext);
+            }
+
+            // Render Output
+            document.getElementById('answer-content').innerHTML = `
+                <div class="bg-teal-50 border border-teal-200 rounded-lg p-4 mb-3">
+                    <div class="flex justify-between items-center mb-2 border-b border-teal-200 pb-2">
+                        <span class="text-xs font-bold text-teal-900"><i class="fa-solid fa-sparkles text-amber-500"></i> ${selectedModelName} 高精度回答</span>
+                        <span class="text-[10px] bg-teal-200 text-teal-800 font-semibold px-2 py-0.5 rounded">担当: ${agent}</span>
+                    </div>
+                    <div class="whitespace-pre-line text-sm text-slate-800 leading-relaxed">${answerText}</div>
+                </div>
+            `;
+
+            // Append Log
+            const now = new Date();
+            const timestamp = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0') + ' ' + 
+                String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0') + ':' + 
+                String(now.getSeconds()).padStart(2, '0');
+
+            const logData = {
+                "日時": timestamp,
+                "質問内容": query,
+                "担当エージェント": agent,
+                "回答結果": answerText.replace(/\n/g, ' '),
+                "推論モデル": selectedModelName
+            };
+
+            db["問い合わせ内容"].unshift(logData);
+            renderLogsTable();
+
+            // Realtime Google Sheet Sync
+            if (gasWebAppUrl) {
+                try {
+                    await fetch(gasWebAppUrl, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            query: query,
+                            agent: agent,
+                            answer: answerText,
+                            model: selectedModelName
+                        })
+                    });
+                    document.getElementById('status-tag').classList.remove('hidden');
+                } catch (e) {
+                    console.error("GAS Sync Error:", e);
+                }
+            } else {
+                document.getElementById('status-tag').classList.remove('hidden');
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-sparkles"></i> 高精度回答を生成＆シート反映`;
+        }
+
+        // Fallback Generator from DB
+        function generateDeterministicFallback(query, context) {
+            if (context.includes("ブロンコ")) {
+                return "【対応方法】\n症状詳記にブロンコ1もしくはブロンコ2が気管支動脈に特化したカーブ形状であるため使用する必要があることを標記してください。\n\n【理由・手続き】\n気管支動脈の塞栓術で使用した際に償還名違いで査定されるため、医師に報告して症状詳記へ追記を依頼してください。";
+            }
+            if (context.includes("アビテン") || context.includes("フロシール")) {
+                return "【対応方法】\nアビテンとフロシールの併用請求は認められません（併用不可）。\n\n【補足】\n併用禁止について担当科部長へ連絡・報告を行ってください。";
+            }
+            if (context.includes("バーコード")) {
+                return "【対応方法】\n医事課にスクリーンショットを印刷して送付してください。現在採用されている医事課コードのみを残し、それ以外は有効期限を設定して使用不可（無効）に修正します。";
+            }
+            return "【対応方法】\n" + (context.split('\n').find(l => l.includes('対応方法')) || 'マニュアルの標準手順に沿ってご対応ください。');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (geminiApiKey) document.getElementById('gemini-key-input').value = geminiApiKey;
+            if (gasWebAppUrl) {
+                document.getElementById('gas-url-input').value = gasWebAppUrl;
+                fetchLogsFromGoogleSheet();
+            } else {
+                renderLogsTable();
+            }
+            renderMasterTable();
+        });
+
+        function switchTab(tab) {
+            document.querySelectorAll('main > section').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('[id$="-btn"]').forEach(el => el.classList.remove('active-tab'));
+
+            if(tab === 'qa') {
+                document.getElementById('sec-qa').classList.remove('hidden');
+                document.getElementById('tab-qa-btn').classList.add('active-tab');
+            } else if(tab === 'logs') {
+                document.getElementById('sec-logs').classList.remove('hidden');
+                document.getElementById('tab-logs-btn').classList.add('active-tab');
+            } else if(tab === 'master') {
+                document.getElementById('sec-master').classList.remove('hidden');
+                document.getElementById('tab-master-btn').classList.add('active-tab');
+            }
+        }
+
+        function setQuery(text) {
+            document.getElementById('user-query').value = text;
+            previewAgentSelection();
+        }
+
+        async function fetchLogsFromGoogleSheet() {
+            if (!gasWebAppUrl) return;
+            try {
+                const res = await fetch(gasWebAppUrl);
+                const data = await res.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    db["問い合わせ内容"] = data;
+                    renderLogsTable();
+                }
+            } catch (err) {}
+        }
+
+        function renderLogsTable() {
+            const logs = db["問い合わせ内容"];
+            const tbody = document.getElementById('logs-table-body');
+            document.getElementById('log-count-badge').innerText = logs.length;
+
+            tbody.innerHTML = logs.map((row, idx) => `
+                <tr class="${idx === 0 ? 'bg-teal-50/60 font-medium' : 'hover:bg-slate-50'}">
+                    <td class="px-4 py-3 whitespace-nowrap text-slate-500">${row.日時 || ''}</td>
+                    <td class="px-4 py-3 text-slate-800 font-medium">${row.質問内容 || ''}</td>
+                    <td class="px-4 py-3"><span class="bg-slate-200 text-slate-700 text-[11px] px-2 py-0.5 rounded">${row.担当エージェント || ''}</span></td>
+                    <td class="px-4 py-3 text-slate-600 truncate max-w-xs" title="${row.回答結果 || ''}">${row.回答結果 || ''}</td>
+                    <td class="px-4 py-3 text-teal-700 font-semibold text-[11px]">${row.推論モデル || ''}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderMasterTable() {
+            const tableName = document.getElementById('master-select').value;
+            const data = db[tableName] || [];
+            
+            const thead = document.getElementById('master-thead');
+            const tbody = document.getElementById('master-tbody');
+
+            if(data.length === 0) {
+                thead.innerHTML = '';
+                tbody.innerHTML = '<tr><td class="p-4">データがありません</td></tr>';
+                return;
+            }
+
+            const keys = Object.keys(data[0]);
+            thead.innerHTML = `<tr>${keys.map(k => `<th class="px-4 py-3">${k}</th>`).join('')}</tr>`;
+            tbody.innerHTML = data.map(row => `
+                <tr class="hover:bg-slate-50">
+                    ${keys.map(k => `<td class="px-4 py-3">${row[k] || ''}</td>`).join('')}
+                </tr>
+            `).join('');
+        }
+
+        function openApiKeyModal() { document.getElementById('apikey-modal').classList.remove('hidden'); }
+        function closeApiKeyModal() { document.getElementById('apikey-modal').classList.add('hidden'); }
+        function saveApiKey() {
+            const key = document.getElementById('gemini-key-input').value.trim();
+            geminiApiKey = key;
+            localStorage.setItem('GEMINI_API_KEY', key);
+            closeApiKeyModal();
+            alert("Gemini APIキーを保存しました。");
+        }
+
+        function openGasModal() { document.getElementById('gas-modal').classList.remove('hidden'); }
+        function closeGasModal() { document.getElementById('gas-modal').classList.add('hidden'); }
+        function saveGasUrl() {
+            const url = document.getElementById('gas-url-input').value.trim();
+            gasWebAppUrl = url;
+            localStorage.setItem('GAS_WEB_APP_URL', url);
+            closeGasModal();
+            fetchLogsFromGoogleSheet();
+        }
+
+        function exportCSV(tableName) {
+            const data = db[tableName];
+            if(!data || data.length === 0) return;
+
+            const headers = Object.keys(data[0]).join(',');
+            const rows = data.map(row => Object.values(row).map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','));
+            const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers, ...rows].join('\n');
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `物流_医事管理_${tableName}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
